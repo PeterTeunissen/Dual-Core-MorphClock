@@ -1,6 +1,6 @@
 # Dual-Core-MorphingClock
 
-![alt text](https://raw.githubusercontent.com/PeterTeunissen/Dual-Core-MorphClock/dual-core-morphclock.jpg?raw=true)
+![alt text](https://github.com/PeterTeunissen/Dual-Core-MorphClock/blob/master/dual-core-morphclock.jpg?raw=true)
 
 The clock code is based on https://github.com/lmirel/MorphingClockRemix.git. 
 
