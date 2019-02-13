@@ -125,18 +125,28 @@ bool loadConfig() {
     return false;
   }
 
-  strcpy(timezone, json["timezone"]);
-  strcpy(military, json["military"]);
+  if (json.get<const char*>("timezone")) {
+    strcpy(timezone, json["timezone"]);
+  } else {
+    Serial.println(F("timezone not set. Using: -5"));    
+  }
+  
+  if (json.get<const char*>("military")) {
+    strcpy(military, json["military"]);
+  } else {
+    Serial.println(F("military not set. Using: Y"));    
+  }
+
   //avoid reboot loop on systems where this is not set
   if (json.get<const char*>("metric")) {
     strcpy(u_metric, json["metric"]);
   } else {
-    Serial.println(F("metric units not set, using default: Y"));
+    Serial.println(F("metric units not set, using: Y"));
   }
   if (json.get<const char*>("date-format")) {
     strcpy(date_fmt, json["date-format"]);
   } else {
-    Serial.println(F("date format not set, using default: D.M.Y"));
+    Serial.println(F("date format not set, using: D.M.Y"));
   }
   
   return true;
@@ -190,17 +200,19 @@ void wifi_setup() {
   //Local intialization. Once its business is done, there is no need to keep it around
   WiFiManager wifiManager;
   wifiManager.setSaveConfigCallback(saveConfigCallback);
-  WiFiManagerParameter timeZoneParameter("timeZone", "Time Zone", timezone, 5); 
+  WiFiManagerParameter timeZoneParameter("timeZone", "TimeZ(hours)", timezone, 5); 
   wifiManager.addParameter(&timeZoneParameter);
   WiFiManagerParameter militaryParameter("military", "24Hr (Y/N)", military, 3); 
   wifiManager.addParameter(&militaryParameter);
-  WiFiManagerParameter metricParameter("metric", "Metric Units (Y/N)", u_metric, 3); 
+  WiFiManagerParameter metricParameter("metric", "Metric? (Y/N)", u_metric, 3); 
   wifiManager.addParameter(&metricParameter);
-  WiFiManagerParameter dmydateParameter("date_fmt", "Date Format (D.M.Y)", date_fmt, 6); 
+  WiFiManagerParameter dmydateParameter("date_fmt", "DateFmt (D.M.Y)", date_fmt, 6); 
   wifiManager.addParameter(&dmydateParameter);
 
+  int an = analogRead(A0);
+  
   //-- Double-Reset --
-  if (drd.detectDoubleReset()) {
+  if (drd.detectDoubleReset() || (an<512) ) {
     Serial.println(F("Double Reset Detected"));
 
     display.setCursor(0, row0);
@@ -328,11 +340,11 @@ void setup() {
   strcpy(tempBuf,"");
   
   //
-  Serial.print(F("display color range ["));
-  Serial.print(display.color565 (0, 0, 0));
-  Serial.print(F(" .. "));
-  Serial.print(display.color565 (255, 255, 255));
-  Serial.println ("]");
+//  Serial.print(F("display color range ["));
+//  Serial.print(display.color565 (0, 0, 0));
+//  Serial.print(F(" .. "));
+//  Serial.print(display.color565 (255, 255, 255));
+//  Serial.println ("]");
   //
 }
 
