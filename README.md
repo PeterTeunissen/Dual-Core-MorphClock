@@ -14,7 +14,7 @@ Additionally, since the clock can be set to Celcius and Fahrenheit, I added anot
 as begin-of-message and end-of-message so that it stays readable and can be mixed with other serial (debug) information. The clock will send ```>F<``` or ```>C<``` to the temperature 
 module. The temperature unit reports the temperature as ```>23<```. 
 
-To program either of the two Wemos' you will need to disconnect the serial connections.
+The two Wemos modules are connected together by connecting Tx to Rx and Rx to Tx lines. To program either of the two Wemos' you will need to disconnect these serial connections.
 
 Another option I added was that if the clock is running Not in Military mode (12 hour clock), I added AM/PM indicating, and 10th-hour digit suppression when that digit is zero.
 
@@ -45,3 +45,14 @@ Alternatively, you can use the 'no-wm' branch for a static configuration approac
 Tested with two Wemos D1 Mini Pro, running at 160MHz and the PxMatrix code from Jan 19, 2019.
 
 Provided 'AS IS', use at your own risk
+
+TODOs:
+
+- [ ] Get time zone information. Hopefully the Master has room to do this.
+- [ ] Change AM/PM colors
+- [ ] Make sure AM/PM colors also dim
+- [ ] Do we remove the temperature and humidiy colors?
+- [ ] Presure color not pretty
+- [ ] RGB Led Strip on the back of box. Add wifi to this one to allow phone app drive the led strip color.
+- [ ] Add wifi manager to Slave
+- [ ] Add config mode during startup when a button is pressed.
