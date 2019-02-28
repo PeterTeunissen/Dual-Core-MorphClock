@@ -99,6 +99,7 @@ char military[3] = "Y";     // 24 hour mode? Y/N
 char u_metric[3] = "N";     // use metric for units? Y/N
 char date_fmt[7] = "M/D/Y"; // date format: D.M.Y or M.D.Y or M.D or D.M or D/M/Y.. looking for trouble
 int digitColor;
+
 bool loadConfig() {
   File configFile = SPIFFS.open("/config.json", "r");
   if (!configFile) {
@@ -184,6 +185,7 @@ bool saveConfig() {
 const byte row0 = 2+0*10;
 const byte row1 = 2+1*10;
 const byte row2 = 2+2*10;
+
 void wifi_setup() {
   //-- Config --
   if (!SPIFFS.begin()) {
