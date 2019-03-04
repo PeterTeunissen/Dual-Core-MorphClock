@@ -8,13 +8,17 @@
 #include <ESP8266mDNS.h>
 #include <DNSServer.h>
 #include <WiFiManager.h>          //https://github.com/tzapu/WiFiManager
+#include "ESP8266HTTPClient.h"
 #include <Ticker.h>
 #include <EEPROM.h>
 #include "html_pages.h"
-
+#include <ArduinoJson.h>
+#include <NtpClientLib.h>
 
 #define ONE_WIRE_BUS_PIN 12 // D6
-#define NUMPIXELS 32                 // Number of LED's in your strip
+#define NUMPIXELS 14  // Number of LED's in your strip
+
+//#define LOG_MAX 1
 
 const int LED_PIN = 2;
 const int SENSOR_INTERVAL = 5;
@@ -30,6 +34,10 @@ String rgb_now = "#0000ff";    //global rgb state values for use in various html
 bool isReading = false;
 char tempBuf[10];
 char tempType=' ';
+String timeZone="";
+char timeZoneBuf[20];
+char timeZoneOffset[10];
+int prevMin;
 
 Ticker ticker;
 OneWire oneWire(ONE_WIRE_BUS_PIN);
@@ -120,7 +128,7 @@ void setup() {
   blue_int = EEPROM.read(2);
   brightness = EEPROM.read(3);
   mode_flag = EEPROM.read(4);
-
+ 
   server.on ( "/", handleIndex );
   server.onNotFound ( handleNotFound );
   
@@ -136,8 +144,133 @@ void setup() {
   server.on ( "/set_mode3", handle_mode_3);
 
   server.begin();
+
+  NTP.begin("pool.ntp.org", 0, false);
+  NTP.setInterval(5*60); 
   
   handleSwitchOn();
+}
+
+void getTimeZone() {
+  WiFiClient wifi;
+  HTTPClient http;
+  String timeZoneJson="";
+  strcpy(timeZoneBuf,"America/New_York");
+  strcpy(timeZoneOffset,"0");
+  
+  if (http.begin(wifi, "http://ip-api.com/json/")) {    
+    #ifdef LOG_MAX
+      Serial.print(F("[HTTP] GET...\n"));
+    #else  
+      Serial.print(F("."));
+    #endif  
+    // start connection and send HTTP header
+    int httpCode = http.GET();
+
+    // httpCode will be negative on error
+    if (httpCode > 0) {
+      // HTTP header has been send and Server response header has been handled
+      #ifdef LOG_MAX
+        Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+      #else  
+        Serial.print(F("."));
+      #endif  
+
+      // file found at server
+      if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+        timeZoneJson = http.getString();
+        #ifdef LOG_MAX
+          Serial.println(timeZoneJson);
+        #endif  
+
+        StaticJsonBuffer<1000> jsonBuffer;
+        JsonObject& json = jsonBuffer.parseObject(timeZoneJson.c_str());
+      
+        if (!json.success ()) {
+          Serial.println(F("Failed to parse ip-api response"));
+          return;
+        }
+                
+        if (json.get<const char*>("timezone")) {
+          strcpy(timeZoneBuf, json["timezone"]);
+          #ifdef LOG_MAX
+            Serial.print(F("timezone name in json:"));    
+            Serial.println(timeZoneBuf);    
+          #else  
+            Serial.print(F("."));
+          #endif
+        } else {
+          Serial.println(F("timezone not found in json. Using: -5"));    
+        }
+      }
+    } else {
+      Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    }
+    http.end();
+  }  
+}
+
+void getTimeZoneOffset() {
+  //http://api.timezonedb.com/v2.1/get-time-zone?key=31VLCCL5BAKD&format=json&by=zone&zone=America/New_York
+  WiFiClient wifi;
+  HTTPClient http;
+
+  String url = "http://api.timezonedb.com/v2.1/get-time-zone?key=31VLCCL5BAKD&format=json&by=zone&zone=" + String(timeZoneBuf);
+  
+  if (http.begin(wifi,url)) {    
+    #ifdef LOG_MAX
+      Serial.print("[HTTP] GET...\n");
+    #else  
+      Serial.print(F("."));
+    #endif
+    int httpCode = http.GET();
+
+    // httpCode will be negative on error
+    if (httpCode > 0) {
+      // HTTP header has been send and Server response header has been handled
+      #ifdef LOG_MAX
+        Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+      #endif  
+
+      // file found at server
+      if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+
+        strcpy(timeZoneOffset,"");
+        
+        String timeZoneJson = http.getString();
+        #ifdef LOG_MAX
+          Serial.println(timeZoneJson);
+        #else  
+          Serial.print(F("."));
+        #endif  
+
+        StaticJsonBuffer<1000> jsonBuffer;
+        JsonObject& json = jsonBuffer.parseObject(timeZoneJson.c_str());
+      
+        if (!json.success ()) {
+          Serial.println(F("Failed to parse time-api response"));
+          return;
+        }
+
+        char b[15];
+                
+        if (json.get<const char*>("gmtOffset")) {
+          strcpy(b, json["gmtOffset"]);
+          int i = atoi(b);
+          int h=i/3600;
+          sprintf(timeZoneOffset,"%d",h);
+          #ifdef LOG_MAX
+            Serial.print(F("gmtOffset in json:"));    
+            Serial.println(timeZoneOffset);    
+          #else  
+            Serial.print(F("."));
+          #endif  
+        } else {
+          Serial.println(F("gmtOffset not found in json. Using: 0"));    
+        }
+      }
+    }
+  }
 }
 
 // Create a 24 bit color value from R,G,B
@@ -205,8 +338,10 @@ void handleSetColour() {
   Serial.println(F("HandleSetColour"));
   String x = String(colour_picker);
   x.replace("%hash_value%",rgb_now);
-  Serial.print("x=");
-  Serial.println(x);
+  #ifdef LOG_MAX
+    Serial.print("x=");
+    Serial.println(x);
+  #endif
 //  server.send ( 200, "text/html", colour_picker);
   server.send ( 200, "text/html", x);
 }
@@ -232,8 +367,10 @@ void handleColour(){
   String message = server.arg(0);                //get the 1st argument from the url which is the hex rgb value from the colour picker ie. #rrggbb (actually %23rrggbb)
   rgb_now = message; 
   rgb_now.replace("%23", "#");                   // change %23 to # as we need this in one of html pages
-  Serial.print(F("Set color to:"));
-  Serial.println(rgb_now);
+  #ifdef LOG_MAX
+    Serial.print(F("Set color to:"));
+    Serial.println(rgb_now);
+  #endif
   String red_val = rgb_now.substring(1,3);       //extract the rgb values
   String green_val = rgb_now.substring(3,5); 
   String blue_val = rgb_now.substring(5,7);
@@ -268,9 +405,10 @@ void handleBrightness() {
   EEPROM.write(3,brightness);                    //write the brightness value to EEPROM to be restored on start-up
   EEPROM.commit();
 
-  Serial.print(F("Set brightness to:"));
-  Serial.println(brightness);
-
+  #ifdef LOG_MAX
+    Serial.print(F("Set brightness to:"));
+    Serial.println(brightness);
+  #endif
   String java_redirect = "<SCRIPT language='JavaScript'>window.location='/set_brightness?";
           java_redirect += brightness;                                              //send brightness value in URL to update the slider control
           java_redirect += "';</SCRIPT>";
@@ -307,10 +445,7 @@ void handle_mode_1(){                                  //fixed colour mode
   EEPROM.commit();
   server.send ( 200, "text/html","<SCRIPT language='JavaScript'>window.location='/';</SCRIPT>");
                                    
-//  while(mode_flag==1){                                // Check the mode hasn't been changed whilst we wait, if so - leave immediately
-    light_up_all();                           //set mode to default state - all led's on, fixed colour. This loop will service any brightness changes
-//    loop();                                   // Not much to do except service the main loop       
-//  }
+  light_up_all();                           //set mode to default state - all led's on, fixed colour. This loop will service any brightness changes
 }
 
 void handle_mode_2(){                                 //colour fade mode
@@ -319,36 +454,10 @@ void handle_mode_2(){                                 //colour fade mode
   EEPROM.write(4,mode_flag);                         //write mode to EEProm so can be restored on start-up
   EEPROM.commit();
   server.send ( 200, "text/html","<SCRIPT language='JavaScript'>window.location='/';</SCRIPT>");
-//  uint16_t i, j, k;
-//  int wait = 10;  //DON'T ever set this more than '10'. Use the 'k' value in the loop below to increase delays. This prevents the watchdog timer timing out on the ESP8266
 
   j=0;
   m=256;
   lastFire=0;
-
-//  while(mode_flag==2){
-//    for(j=0; j<256; j++) {
-//      loop();
-//      for(i=0; i<NUMPIXELS; i++) {
-//        if (mode_flag!=2){
-//          return;
-//        }                    //the mode has been changed - get outta here!
-//        loop();
-//        strip.setPixelColor(i, Wheel((j) & 255));
-//        strip.show();
-//      } 
-//      loop(); 
-//        
-//      for(k=0; k < 200; k++){                          // Do ten loops of the 'wait' and service loop routine inbetween. Total wait = 10 x 'wait'. This prevents sluggishness in the browser html front end menu.
-//        if (mode_flag!=2){
-//          return;
-//        }                    //the mode has been changed - get outta here!
-//        delay(wait);
-//        loop();
-//      }
-//      loop();
-//    }
-//  }
 }
 
 void handle_mode_3(){                                //rainbow mode
@@ -357,37 +466,10 @@ void handle_mode_3(){                                //rainbow mode
   EEPROM.write(4,mode_flag);                        //write mode to EEProm so can be restored on start-up
   EEPROM.commit();
   server.send ( 200, "text/html","<SCRIPT language='JavaScript'>window.location='/';</SCRIPT>");
-//  uint16_t i, j, k;
-//  int wait = 10;  //DON'T ever set this more than '10'. Use the 'k' value in the loop below to increase delays. This prevents the watchdog timer timing out on the ESP8266
 
   j=0;
   m=256*5;
-  lastFire=0;
-    
-//  while(mode_flag==3){                               // do this indefenitely or until mode changes
-//    for(j=0; j < 256*5; j++) {                        // 5 cycles of all colors on wheel
-//      if (mode_flag!=3){
-//        return;
-//      }                    //the mode has been changed - get outta here!
-//      loop();
-//      for(i=0; i < NUMPIXELS; i++) {
-//        loop();
-//        strip.setPixelColor(i,Wheel(((i * 256 / NUMPIXELS) + j) & 255));
-//        if (mode_flag!=3){
-//          return;
-//        }                    //the mode has been changed - get outta here!
-//      }
-//      strip.show();
-//
-//      for(k=0; k < 50; k++){                         // Do ten loops of the 'wait' and service loop routine inbetween. Total wait = 10 x 'wait'. This prevents sluggishness in the browser html front end menu.
-//        if (mode_flag!=3){
-//          return;
-//        }                    //the mode has been changed - get outta here!
-//        delay(wait);
-//        loop();                    
-//      }
-//    }
-//  }
+  lastFire=0;    
 }
 
 void colorLoop() {
@@ -396,8 +478,6 @@ void colorLoop() {
     if (millis()-lastFire>(wait*200)) {
       lastFire = millis();
       j++;
-      Serial.print(F("mode 2 fire "));
-      Serial.println(j);
       if (j>m) {
         j=0;
       } else {
@@ -406,46 +486,16 @@ void colorLoop() {
             return;
           }
           strip.setPixelColor(i, Wheel((j) & 255));
-          Serial.print(F("mode 2 show "));
-          Serial.print(j);
-          Serial.print(" ");
-          Serial.println(i);
           strip.show();
         } 
       }
     }    
   }
-  
-//  while(mode_flag==2){
-//    for(j=0; j<256; j++) {
-//      loop();
-//      for(i=0; i<NUMPIXELS; i++) {
-//        if (mode_flag!=2){
-//          return;
-//        }                    //the mode has been changed - get outta here!
-//        loop();
-//        strip.setPixelColor(i, Wheel((j) & 255));
-//        strip.show();
-//      } 
-//      loop(); 
-//        
-//      for(k=0; k < 200; k++){
-//        if (mode_flag!=2){
-//          return;
-//        }
-//        delay(wait);
-//        loop();
-//      }
-//      loop();
-//    }
-//  }
-    
+      
   if (mode_flag==3) {
     if (millis()-lastFire>(wait*50)) {
       lastFire = millis();
       j++;
-      Serial.print(F("mode 3 fire "));
-      Serial.println(j);
       if (j>m) {
         j=0;
       } else {
@@ -455,37 +505,10 @@ void colorLoop() {
           }
           strip.setPixelColor(i,Wheel(((i * 256 / NUMPIXELS) + j) & 255));
         }
-        Serial.print(F("mode 3 show "));
-        Serial.println(j);
         strip.show();      
       }
     }
-  }
-
-//    for(j=0; j < 256*5; j++) {                        // 5 cycles of all colors on wheel
-//      if (mode_flag!=3){
-//        return;
-//      }                    //the mode has been changed - get outta here!
-//      loop();
-//      for(i=0; i < NUMPIXELS; i++) {
-//        loop();
-//        strip.setPixelColor(i,Wheel(((i * 256 / NUMPIXELS) + j) & 255));
-//        if (mode_flag!=3){
-//          return;
-//        }                    //the mode has been changed - get outta here!
-//      }
-//      strip.show();
-//
-//      for(k=0; k < 50; k++){                         // Do ten loops of the 'wait' and service loop routine inbetween. Total wait = 10 x 'wait'. This prevents sluggishness in the browser html front end menu.
-//        if (mode_flag!=3){
-//          return;
-//        }                    //the mode has been changed - get outta here!
-//        delay(wait);
-//        loop();                    
-//      }
-//    }
-//  }
-      
+  }      
 }
 
 uint32_t Wheel(byte WheelPos) {
@@ -513,12 +536,14 @@ void rainbow(uint8_t wait) {
   }
 }
 
+int prevSec;
+
 void loop() {
 
   mdns.update();
   server.handleClient();
   colorLoop();
-  
+
   while(Serial.available()) {
     char c = Serial.read();
     if (c=='>') {
@@ -541,39 +566,80 @@ void loop() {
       tempType=' ';
       if (strcmp(tempBuf,"C")==0) {
         tempType='C';
+        Serial.println(F("Switch to C"));
       }
       if (strcmp(tempBuf,"F")==0) {
         tempType='F';
+        Serial.println(F("Switch to F"));
       }
     }
   }
+
+  if (second()!=prevSec) {
+    prevSec = second();
+
+    if (strlen(timeZoneOffset)==0) {
+      getTimeZone();
+      getTimeZoneOffset();            
+    }
+    
+    // Sync time zone offset every 5 and 35 seconds
+    if (second()==5 || second()==35){
+      #ifdef LOG_MAX
+        Serial.print(F("Bef:"));
+        Serial.print(NTP.getTimeDateString(now()));
+      #else
+        Serial.println(F("."));  
+      #endif
+      prevSec = second();
   
-  if (millis() - lastTimeSent >= SENSOR_INTERVAL * 1000UL || lastTimeSent == 0) {
-
-    digitalWrite(LED_PIN, LOW);
-
-    sensors.setWaitForConversion(false);
-    sensors.requestTemperatures();  
-    sensors.setWaitForConversion(true);
-
-    float temp = -1000.0;
-    if (tempType=='C') {
-      Serial.println("Sending C");
-      temp = sensors.getTempCByIndex(0);
-    } 
-    if (tempType=='F') {
-      Serial.println("Sending F");
-      temp = sensors.getTempFByIndex(0);
+      if ((hour()>23 || hour()<5) && (minute()>57 || minute()<4)) {
+        getTimeZone();
+        getTimeZoneOffset();      
+      }
+      
+      #ifdef LOG_MAX
+        Serial.print(F("Aft:"));
+        Serial.println(NTP.getTimeDateString(now()));
+      #else
+        Serial.println(F("."));  
+      #endif
     }
 
-    // Implements the 'protocol': a greater-then sign followed by value, followed by less-then sign.
-    if (temp!=-1000.0) {
-      Serial.print(">");
-      Serial.print(temp);
-      Serial.println("<");
+    if (second()==15 || second()==45){
+      if (strlen(timeZoneOffset)>0) {
+        Serial.print(F("tz:["));
+        Serial.print(timeZoneOffset);
+        Serial.println(F("]"));      
+      }
     }
-          
-    digitalWrite(LED_PIN, HIGH);
-    lastTimeSent = millis();
-  }
+
+    if (second()==20 || second()==50) {
+      digitalWrite(LED_PIN, LOW);
+  
+      sensors.setWaitForConversion(false);
+      sensors.requestTemperatures();  
+      sensors.setWaitForConversion(true);
+  
+      float temp = -1000.0;
+      if (tempType=='C') {
+        Serial.println(F("Send C"));
+        temp = sensors.getTempCByIndex(0);
+      } 
+      if (tempType=='F') {
+        Serial.println(F("Send F"));
+        temp = sensors.getTempFByIndex(0);
+      }
+  
+      // Implements the 'protocol': a greater-then sign followed by value, followed by less-then sign.
+      if (temp!=-1000.0) {
+        Serial.print(F("tmp: >"));
+        Serial.print(temp);
+        Serial.println(F("<"));
+      }
+  
+      digitalWrite(LED_PIN, HIGH);
+      lastTimeSent = millis();      
+    }
+  }  
 }
