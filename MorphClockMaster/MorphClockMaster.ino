@@ -6,12 +6,15 @@ provided 'AS IS', use at your own risk
  * mirel.t.lazar@gmail.com
  */
 
-#include <TimeLib.h>
 #include <NtpClientLib.h>
 #include <ESP8266WiFi.h>
 
 #define double_buffer
 #include <PxMatrix.h>
+
+extern "C" {
+  #include "user_interface.h"
+}
 
 //#define USE_ICONS
 //#define USE_FIREWORKS
@@ -27,12 +30,6 @@ provided 'AS IS', use at your own risk
 char wifiManagerAPName[] = "MorphClk";
 char wifiManagerAPPassword[] = "MorphClk";
 
-//== DOUBLE-RESET DETECTOR ==
-#include <DoubleResetDetector.h>
-#define DRD_TIMEOUT 10 // Second-reset must happen within 10 seconds of first reset to be considered a double-reset
-#define DRD_ADDRESS 0 // RTC Memory Address for the DoubleResetDetector to use
-DoubleResetDetector drd(DRD_TIMEOUT, DRD_ADDRESS);
-
 //== SAVING CONFIG ==
 #include "FS.h"
 #include <ArduinoJson.h>
@@ -45,15 +42,15 @@ void saveConfigCallback() {
 }
 
 #ifdef ESP8266
-#include <Ticker.h>
-Ticker display_ticker;
-#define P_LAT 16
-#define P_A 5
-#define P_B 4
-#define P_C 15
-#define P_D 12
-#define P_E 0
-#define P_OE 2
+  #include <Ticker.h>
+  Ticker display_ticker;
+  #define P_LAT 16
+  #define P_A 5
+  #define P_B 4
+  #define P_C 15
+  #define P_D 12
+  #define P_E 0
+  #define P_OE 2
 #endif
 
 // Pins for LED MATRIX
@@ -70,11 +67,11 @@ Digit digit4(&display, 0, 63 - 7 - 9*5, 8, display.color565(0, 0, 255));
 Digit digit5(&display, 0, 63 - 7 - 9*6, 8, display.color565(0, 0, 255));
 
 #ifdef ESP8266
-// ISR for display refresh
-void display_updater() {
-  //display.displayTestPattern(70);
-  display.display (70);
-}
+  // ISR for display refresh
+  void display_updater() {
+    //display.displayTestPattern(70);
+    display.display(70);
+  }
 #endif
 
 void getWeather();
@@ -82,34 +79,27 @@ void getWeather();
 void configModeCallback (WiFiManager *myWiFiManager) {
   //Serial.println(F("Entered config mode"));
   Serial.println(WiFi.softAPIP());
-
-  // You could indicate on your screen or by an LED you are in config mode here
-
-  // We don't want the next time the boar resets to be considered a double reset
-  // so we remove the flag
-  drd.stop();
 }
 
-char tempBuf[10];
+char readBuf[10];
 int oldTemp;
 int newTemp;
-bool isReading = false;
+char readMode= ' ';
 char timezone[5] = "-5";
 char military[3] = "Y";     // 24 hour mode? Y/N
 char u_metric[3] = "N";     // use metric for units? Y/N
 char date_fmt[7] = "M/D/Y"; // date format: D.M.Y or M.D.Y or M.D or D.M or D/M/Y.. looking for trouble
 int digitColor;
-
 bool loadConfig() {
   File configFile = SPIFFS.open("/config.json", "r");
   if (!configFile) {
-    Serial.println(F("Failed to open config file"));
+    Serial.println(F("Err opn cnfg"));
     return false;
   }
 
-  size_t size = configFile.size ();
+  size_t size = configFile.size();
   if (size > 1024) {
-    Serial.println(F("Config file size is too large"));
+    Serial.println(F("Cnfg larger 1024"));
     return false;
   }
 
@@ -121,7 +111,7 @@ bool loadConfig() {
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& json = jsonBuffer.parseObject(buf.get());
 
-  if (!json.success ()) {
+  if (!json.success()) {
     Serial.println(F("Failed to parse config file"));
     return false;
   }
@@ -137,17 +127,16 @@ bool loadConfig() {
   } else {
     Serial.println(F("military not set. Using: Y"));    
   }
-
   //avoid reboot loop on systems where this is not set
   if (json.get<const char*>("metric")) {
     strcpy(u_metric, json["metric"]);
   } else {
-    Serial.println(F("metric units not set, using: Y"));
+    Serial.println(F("metric not set,: Y"));
   }
   if (json.get<const char*>("date-format")) {
     strcpy(date_fmt, json["date-format"]);
   } else {
-    Serial.println(F("date format not set, using: D.M.Y"));
+    Serial.println(F("date fmt not set: D.M.Y"));
   }
   
   return true;
@@ -163,7 +152,7 @@ bool saveConfig() {
 
   File configFile = SPIFFS.open("/config.json", "w");
   if (!configFile) {
-    Serial.println(F("Failed to open config file for writing"));
+    Serial.println(F("Err open cnf for w"));
     return false;
   }
 
@@ -185,11 +174,10 @@ bool saveConfig() {
 const byte row0 = 2+0*10;
 const byte row1 = 2+1*10;
 const byte row2 = 2+2*10;
-
 void wifi_setup() {
   //-- Config --
   if (!SPIFFS.begin()) {
-    Serial.println(F("Failed to mount FS"));
+    Serial.println(F("Fail mount FS"));
     return;
   }
   loadConfig ();
@@ -202,20 +190,17 @@ void wifi_setup() {
   //Local intialization. Once its business is done, there is no need to keep it around
   WiFiManager wifiManager;
   wifiManager.setSaveConfigCallback(saveConfigCallback);
-  WiFiManagerParameter timeZoneParameter("timeZone", "TimeZ(hours)", timezone, 5); 
+  WiFiManagerParameter timeZoneParameter("timeZone", "TimeZn(hrs)", timezone, 5); 
   wifiManager.addParameter(&timeZoneParameter);
   WiFiManagerParameter militaryParameter("military", "24Hr (Y/N)", military, 3); 
   wifiManager.addParameter(&militaryParameter);
-  WiFiManagerParameter metricParameter("metric", "Metric? (Y/N)", u_metric, 3); 
+  WiFiManagerParameter metricParameter("metric", "Metric?(Y/N)", u_metric, 3); 
   wifiManager.addParameter(&metricParameter);
-  WiFiManagerParameter dmydateParameter("date_fmt", "DateFmt (D.M.Y)", date_fmt, 6); 
+  WiFiManagerParameter dmydateParameter("date_fmt", "DateFMTt (D.M.Y)", date_fmt, 6); 
   wifiManager.addParameter(&dmydateParameter);
 
-  int an = analogRead(A0);
-  
-  //-- Double-Reset --
-  if (drd.detectDoubleReset() || (an<512) ) {
-    Serial.println(F("Double Reset Detected"));
+  if (analogRead(A0)<512) {
+    Serial.println(F("Config mode"));
 
     display.setCursor(0, row0);
     display.print("AP:");
@@ -232,7 +217,7 @@ void wifi_setup() {
 
     display.fillScreen(display.color565(0, 0, 0));
   } else {
-    Serial.println(F("No Double Reset Detected"));
+    Serial.println(F("Normal mode"));
 
     //display.setCursor (2, row1);
     //display.print ("connecting");
@@ -264,7 +249,7 @@ void wifi_setup() {
   //display.setCursor (2, row1);
   TFDrawText(&display, String("     ONLINE     "), 0, 13, display.color565(0, 0, 255));
   Serial.print(F("WiFi connected, IP address: "));
-  Serial.println(WiFi.localIP ());
+  Serial.println(WiFi.localIP());
   //
   //start NTP
   NTP.begin("pool.ntp.org", String(timezone).toInt(), false);
@@ -273,15 +258,9 @@ void wifi_setup() {
   if (shouldSaveConfig) {
     saveConfig ();
   }
-
-  drd.stop ();
   
-  //delay (1500);
   getWeather ();
 }
-
-uint16_t amColor = display.color565(0,150,0);
-uint16_t pmColor = display.color565(60, 20, 0);
 
 byte hh;
 byte hh24;
@@ -290,23 +269,33 @@ byte ss;
 byte ntpsync = 1;
 //
 void setup() {	
-	Serial.begin(115200);
+  Serial.begin(115200);
   //display setup
   display.begin (16);
   display.setDriverChip(FM6126A);
+
+  Serial.print(F("Mem1a:"));
+  Serial.println(system_get_free_heap_size());
+
 #ifdef ESP8266
   display_ticker.attach(0.002, display_updater);
 #endif
-  //
+
+  Serial.print(F("Mem1b:"));
+  Serial.println(system_get_free_heap_size());
+
   wifi_setup ();
-  //
+
+  Serial.print(F("Mem1c:"));
+  Serial.println(system_get_free_heap_size());
+
   NTP.onNTPSyncEvent ([](NTPSyncEvent_t ntpEvent) {
     if (ntpEvent) {
       Serial.print("TimeSync err:");
       if (ntpEvent == noResponse)
-        Serial.println(F("NTP server not reachable"));
+        Serial.println(F("NTP not reach"));
       else if (ntpEvent == invalidAddress)
-        Serial.println(F("Invalid NTP server address"));
+        Serial.println(F("Invalid NTP address"));
     } else {
       Serial.print(F("Got NTP time:"));
       Serial.println(NTP.getTimeDateString (NTP.getLastNTPSync ()));
@@ -339,16 +328,8 @@ void setup() {
     digit1.setY(digit1.getY() + 6);
   }
 
-  strcpy(tempBuf,"");
-  
-  //
-//  Serial.print(F("display color range ["));
-//  Serial.print(display.color565 (0, 0, 0));
-//  Serial.print(F(" .. "));
-//  Serial.print(display.color565 (255, 255, 255));
-//  Serial.println ("]");
-  //
-}
+  strcpy(readBuf,"");
+  }
 
 //open weather map api key 
 String apiKey   = "aec6c8810510cce7b0ee8deca174c79a"; //e.g a hex string like "abcdef0123456789abcdef0123456789"
@@ -361,14 +342,13 @@ int tempMax = -10000;
 int tempM = -10000;
 int presM = -10000;
 int humiM = -10000;
-int condM = -1;  //-1 - undefined, 0 - unk, 1 - sunny, 2 - cloudy, 3 - overcast, 4 - rainy, 5 - thunders, 6 - snow
 String condS = "";
 void getWeather() {
   if (!apiKey.length()) {
-    Serial.println(F("w:missing API KEY for weather data, skipping")); 
+    Serial.println(F("No API KEY for weather")); 
     return;
   }
-  Serial.print(F("i:connecting to weather server.. ")); 
+  Serial.print(F("i:conn to weather")); 
   // if you get a connection, report back via serial: 
   if (client.connect(server, 80)) { 
     Serial.println(F("connected.")); 
@@ -382,47 +362,47 @@ void getWeather() {
     client.println("Connection: close");
     client.println(); 
   } else { 
-    Serial.println(F("w:unable to connect"));
+    Serial.println(F("w:fail connect"));
     return;
   } 
-  delay (1000);
+  delay(200);
   String sval = "";
   int bT, bT2;
   //do your best
-  String line = client.readStringUntil ('\n');
+  String line = client.readStringUntil('\n');
   if (!line.length ()) {
-    Serial.println(F("w:unable to retrieve weather data"));
+    Serial.println(F("w:fail weather"));
   } else {
-    Serial.print(F("weather:")); 
-    Serial.println(line); 
-    //weather conditions - "main":"Clear",
-    bT = line.indexOf("\"main\":\"");
-    if (bT > 0) {
-      bT2 = line.indexOf("\",\"", bT + 8);
-      sval = line.substring(bT + 8, bT2);
-      Serial.print(F("cond "));
-      Serial.println(sval);
-      //0 - unk, 1 - sunny, 2 - cloudy, 3 - overcast, 4 - rainy, 5 - thunders, 6 - snow
-      condM = 0;
-      if (sval.equals("Clear")) 
-        condM = 1;
-      else if (sval.equals("Clouds"))
-        condM = 2;
-      else if (sval.equals("Overcast"))
-        condM = 3;
-      else if (sval.equals("Rain"))
-        condM = 4;
-      else if (sval.equals("Drizzle"))
-        condM = 4;
-      else if (sval.equals("Thunderstorm"))
-        condM = 5;
-      else if (sval.equals("Snow"))
-        condM = 6;
-      //
-      condS = sval;
-      Serial.print(F("condM "));
-      Serial.println(condM);
-    }
+//    Serial.print(F("weather:")); 
+//    Serial.println(line); 
+//    //weather conditions - "main":"Clear",
+//    bT = line.indexOf("\"main\":\"");
+//    if (bT > 0) {
+//      bT2 = line.indexOf("\",\"", bT + 8);
+//      sval = line.substring(bT + 8, bT2);
+//      Serial.print(F("cond "));
+//      Serial.println(sval);
+//      //0 - unk, 1 - sunny, 2 - cloudy, 3 - overcast, 4 - rainy, 5 - thunders, 6 - snow
+//      condM = 0;
+//      if (sval.equals("Clear")) 
+//        condM = 1;
+//      else if (sval.equals("Clouds"))
+//        condM = 2;
+//      else if (sval.equals("Overcast"))
+//        condM = 3;
+//      else if (sval.equals("Rain"))
+//        condM = 4;
+//      else if (sval.equals("Drizzle"))
+//        condM = 4;
+//      else if (sval.equals("Thunderstorm"))
+//        condM = 5;
+//      else if (sval.equals("Snow"))
+//        condM = 6;
+//      //
+//      condS = sval;
+//      Serial.print(F("condM "));
+//      Serial.println(condM);
+//    }
     //tempM
     bT = line.indexOf("\"temp\":");
     if (bT > 0) {
@@ -432,7 +412,7 @@ void getWeather() {
       Serial.println (sval);
       tempM = sval.toInt ();
     } else {
-      Serial.println(F("temp NOT found!"));
+      Serial.println(F("temp NF!"));
     }
     //tempMin
     bT = line.indexOf("\"temp_min\":");
@@ -443,18 +423,18 @@ void getWeather() {
       Serial.println(sval);
       tempMin = sval.toInt ();
     } else {
-      Serial.println(F("temp_min NOT found!"));
+      Serial.println(F("temp_min NF!"));
     }
     //tempMax
     bT = line.indexOf("\"temp_max\":");
     if (bT > 0) {
       bT2 = line.indexOf("},", bT + 11);
       sval = line.substring (bT + 11, bT2);
-      Serial.print ("temp max: ");
-      Serial.println (sval);
+      Serial.print("temp max: ");
+      Serial.println(sval);
       tempMax = sval.toInt ();
     } else {
-      Serial.println ("temp_max NOT found!");
+      Serial.println("temp_max NF!");
     }
     //pressM
     bT = line.indexOf("\"pressure\":");
@@ -465,7 +445,7 @@ void getWeather() {
       Serial.println(sval);
       presM = sval.toInt();
     } else {
-      Serial.println(F("pressure NOT found!"));
+      Serial.println(F("pressure NF!"));
     }
     //humiM
     bT = line.indexOf("\"humidity\":");
@@ -476,7 +456,7 @@ void getWeather() {
       Serial.println (sval);
       humiM = sval.toInt();
     } else {
-      Serial.println(F("humidity NOT found!"));
+      Serial.println(F("humidity NF!"));
     }
   }//connected
 }
@@ -485,349 +465,44 @@ void readLoop() {
 
   while (Serial.available()) {
     char c = Serial.read();
-    if (c=='>') {
-      isReading = true;
-      strcpy(tempBuf,"");
+    if (c=='>' && readMode==' ') {
+      readMode='T';
+      strcpy(readBuf,"");
     }
 
-    if (c=='<') {
-      if (isReading==true) {
-        newTemp = atoi(tempBuf);
-      }
-      isReading = false;      
+    if (c=='[' && readMode==' ') {
+      readMode='Z';
+      strcpy(readBuf,"");
     }
 
-    if (isReading==true && strlen(tempBuf)<8 && c>'*' && c<':') {
-      strncat(tempBuf,&c,1);
-      Serial.print(F("tempBuf:"));
-      Serial.println(tempBuf);
+    if (c=='<' && readMode=='T') {
+      Serial.println();
+      newTemp = atoi(readBuf);
+      readMode=' ';      
     }
 
-    if (strlen(tempBuf)>8) {
-      isReading = false;
-      Serial.println(F("tempBuf overrun. Resetting"));      
+    if (c==']' && readMode=='Z') {
+      Serial.println();
+      strcpy(timezone,readBuf);
+      NTP.setTimeZone(atoi(readBuf),0);
+      saveConfig();
+      readMode=' ';      
+    }
+
+    if ((readMode=='Z' || readMode=='T') && strlen(readBuf)<8 && c>'*' && c<':') {
+      strncat(readBuf,&c,1);
+//      Serial.print(F("readBuf:"));
+      Serial.println(readBuf);
+    }
+
+    if (strlen(readBuf)>8) {
+      readMode = ' ';
+      Serial.println(F("readBuf overrun."));      
     }
   }  
 }
 
-#ifdef USE_ICONS
-#include "TinyIcons.h"
-//icons 10x5: 10 cols, 5 rows
-int moony_ico [50] = {
-  //3 nuances: 0x18c3 < 0x3186 < 0x4a49
-  0x0000, 0x4a49, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x18c3,
-  0x0000, 0x0000, 0x0000, 0x4a49, 0x3186, 0x3186, 0x18c3, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x4a49, 0x4a49, 0x3186, 0x3186, 0x3186, 0x18c3, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x4a49, 0x3186, 0x3186, 0x3186, 0x3186, 0x18c3, 0x0000, 0x0000,
-};
-
-#ifdef USE_WEATHER_ANI
-int moony1_ico [50] = {
-  //3 nuances: 0x18c3 < 0x3186 < 0x4a49
-  0x0000, 0x18c3, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x4a49,
-  0x0000, 0x0000, 0x0000, 0x4a49, 0x3186, 0x3186, 0x18c3, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x4a49, 0x4a49, 0x3186, 0x3186, 0x3186, 0x18c3, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x4a49, 0x3186, 0x3186, 0x3186, 0x3186, 0x18c3, 0x0000, 0x0000,
-};
-
-int moony2_ico [50] = {
-  //3 nuances: 0x18c3 < 0x3186 < 0x4a49
-  0x0000, 0x3186, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x3186,
-  0x0000, 0x0000, 0x0000, 0x4a49, 0x3186, 0x3186, 0x18c3, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x4a49, 0x4a49, 0x3186, 0x3186, 0x3186, 0x18c3, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x4a49, 0x3186, 0x3186, 0x3186, 0x3186, 0x18c3, 0x0000, 0x0000,
-};
-#endif
-
-int sunny_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0xffe0, 0x0000, 0x0000, 0xffe0, 0x0000, 0x0000, 0x0000,
-  0x0000, 0xffe0, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xffe0, 0x0000,
-  0x0000, 0x0000, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0x0000, 0x0000, 0x0000,
-  0xffe0, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0x0000, 0xffe0,
-  0x0000, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0x0000, 0x0000,
-};
-
-#ifdef USE_WEATHER_ANI
-int sunny1_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0xffe0, 0x0000, 0x0000, 0xffff, 0x0000, 0x0000, 0x0000,
-  0x0000, 0xffff, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xffe0, 0x0000,
-  0x0000, 0x0000, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0x0000, 0x0000, 0x0000,
-  0xffe0, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0x0000, 0xffff,
-  0x0000, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0x0000, 0x0000,
-};
-
-int sunny2_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0xffff, 0x0000, 0x0000, 0xffe0, 0x0000, 0x0000, 0x0000,
-  0x0000, 0xffe0, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xffff, 0x0000,
-  0x0000, 0x0000, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0x0000, 0x0000, 0x0000,
-  0xffff, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0x0000, 0xffe0,
-  0x0000, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0x0000, 0x0000,
-};
-#endif
-
-int cloudy_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0xffe0, 0x0000, 0x0000, 0xffe0, 0x0000, 0x0000, 0x0000,
-  0x0000, 0xffe0, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0xc618, 0xffe0, 0x0000,
-  0x0000, 0x0000, 0x0000, 0xffe0, 0xffe0, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000,
-  0xffe0, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618,
-  0x0000, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xc618, 0xc618, 0xc618, 0xc618,
-};
-
-#ifdef USE_WEATHER_ANI
-int cloudy1_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0xffff, 0x0000, 0x0000, 0xffe0, 0x0000, 0x0000, 0x0000,
-  0x0000, 0xffe0, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0xc618, 0xffff, 0x0000,
-  0x0000, 0x0000, 0x0000, 0xffe0, 0xffe0, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000,
-  0xffff, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618,
-  0x0000, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xc618, 0xc618, 0xc618, 0xc618,
-};
-
-int cloudy2_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0xffe0, 0x0000, 0x0000, 0xffff, 0x0000, 0x0000, 0x0000,
-  0x0000, 0xffff, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0xc618, 0xffe0, 0x0000,
-  0x0000, 0x0000, 0x0000, 0xffe0, 0xffe0, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000,
-  0xffe0, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618,
-  0x0000, 0x0000, 0xffe0, 0xffe0, 0xffe0, 0xffe0, 0xc618, 0xc618, 0xc618, 0xc618,
-};
-#endif
-
-int ovrcst_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0xc618, 0x0000, 0x0000,
-  0x0000, 0x0000, 0xc618, 0xc618, 0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000,
-  0x0000, 0xc618, 0xffff, 0xffff, 0xc618, 0xffff, 0xffff, 0xffff, 0xc618, 0x0000,
-  0x0000, 0xc618, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xc618, 0x0000,
-  0x0000, 0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000, 0x0000,
-};
-
-#ifdef USE_WEATHER_ANI
-int ovrcst1_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0xc618, 0x0000, 0x0000,
-  0x0000, 0x0000, 0xc618, 0xc618, 0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000,
-  0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0xffff, 0xffff, 0xffff, 0xc618, 0x0000,
-  0x0000, 0xc618, 0xc618, 0xc618, 0xffff, 0xffff, 0xffff, 0xffff, 0xc618, 0x0000,
-  0x0000, 0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000, 0x0000,
-};
-
-int ovrcst2_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0xc618, 0x0000, 0x0000,
-  0x0000, 0x0000, 0xc618, 0xc618, 0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000,
-  0x0000, 0xc618, 0xffff, 0xffff, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000,
-  0x0000, 0xc618, 0xffff, 0xffff, 0xffff, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000,
-  0x0000, 0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000, 0x0000,
-};
-#endif
-
-int thndr_ico [50] = {
-  0x041f, 0xc618, 0x041f, 0xc618, 0xc618, 0xc618, 0x041f, 0xc618, 0xc618, 0x041f,
-  0xc618, 0xc618, 0xc618, 0xc618, 0x041f, 0xc618, 0xc618, 0x041f, 0xc618, 0xc618,
-  0xc618, 0x041f, 0xc618, 0xc618, 0xc618, 0x041f, 0xc618, 0xc618, 0xc618, 0xc618,
-  0xc618, 0xc618, 0xc618, 0x041f, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0x041f,
-  0xc618, 0x041f, 0xc618, 0xc618, 0xc618, 0xc618, 0x041f, 0xc618, 0x041f, 0xc618,
-};
-
-int rain_ico [50] = {
-  0x041f, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x041f,
-  0x0000, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000,
-  0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x041f,
-  0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x041f, 0x0000,
-};
-
-#ifdef USE_WEATHER_ANI
-int rain1_ico [50] = {
-  0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x041f, 0x0000,
-  0x041f, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x041f,
-  0x0000, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000,
-  0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x041f,
-};
-
-int rain2_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x041f,
-  0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x041f, 0x0000,
-  0x041f, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x041f,
-  0x0000, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000,
-  0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000,
-};
-
-int rain3_ico [50] = {
-  0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x041f,
-  0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x041f, 0x0000,
-  0x041f, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x041f,
-  0x0000, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000,
-};
-
-int rain4_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000,
-  0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x041f,
-  0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x041f, 0x0000,
-  0x041f, 0x0000, 0x041f, 0x0000, 0x0000, 0x0000, 0x041f, 0x0000, 0x0000, 0x041f,
-};
-#endif
-
-int snow_ico [50] = {
-  0xc618, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0xc618,
-  0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000,
-  0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618,
-  0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0xc618, 0x0000,
-};
-
-#ifdef USE_WEATHER_ANI
-int snow1_ico [50] = {
-  0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0xc618, 0x0000,
-  0xc618, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0xc618,
-  0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000,
-  0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618,
-};
-
-int snow2_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618,
-  0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0xc618, 0x0000,
-  0xc618, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0xc618,
-  0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000,
-  0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000,
-};
-
-int snow3_ico [50] = {
-  0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618,
-  0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0xc618, 0x0000,
-  0xc618, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0xc618,
-  0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000,
-};
-
-int snow4_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000,
-  0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618,
-  0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0xc618, 0x0000,
-  0xc618, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0xc618,
-};
-#endif
-
-#ifdef USE_WEATHER_ANI
-int *suny_ani[] = {sunny_ico, sunny1_ico, sunny2_ico, sunny1_ico, sunny2_ico};
-int *clod_ani[] = {cloudy_ico, cloudy1_ico, cloudy2_ico, cloudy1_ico, cloudy2_ico};
-int *ovct_ani[] = {ovrcst_ico, ovrcst1_ico, ovrcst2_ico, ovrcst1_ico, ovrcst2_ico};
-int *rain_ani[] = {rain_ico, rain1_ico, rain2_ico, rain3_ico, rain4_ico};
-int *thun_ani[] = {thndr_ico, rain1_ico, rain2_ico, rain3_ico, rain4_ico};
-int *snow_ani[] = {snow_ico, snow1_ico, snow2_ico, snow3_ico, snow4_ico};
-int *mony_ani[] = {moony_ico, moony1_ico, moony2_ico, moony1_ico, moony2_ico};
-#else
-int *suny_ani[] = {sunny_ico, sunny_ico, sunny_ico, sunny_ico, sunny_ico};
-int *clod_ani[] = {cloudy_ico, cloudy_ico, cloudy_ico, cloudy_ico, cloudy_ico};
-int *ovct_ani[] = {ovrcst_ico, ovrcst_ico, ovrcst_ico, ovrcst_ico, ovrcst_ico};
-int *rain_ani[] = {rain_ico, rain_ico, rain_ico, rain_ico, rain_ico};
-int *thun_ani[] = {thndr_ico, rain_ico, rain_ico, rain_ico, rain_ico};
-int *snow_ani[] = {snow_ico, snow_ico, snow_ico, snow_ico, snow_ico};
-int *mony_ani[] = {moony_ico, moony_ico, moony_ico, moony_ico, moony_ico};
-#endif
-/*
- * 
-int ovrcst_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0x0000, 0x0000, 0x0000, 0x0000,
-  0x0000, 0x0000, 0x0000, 0xc618, 0xc618, 0xffff, 0xc618, 0x0000, 0x0000, 0x0000,
-  0x0000, 0xc618, 0xffff, 0x0000, 0xffff, 0xffff, 0xffff, 0xffff, 0xc618, 0x0000,
-  0xc618, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xc618,
-  0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000,
-};
-
-int ovrcst_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xc618, 0xc618, 0x0000, 0x0000,
-  0x0000, 0x0000, 0xc618, 0xc618, 0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000,
-  0x0000, 0xc618, 0xffff, 0xffff, 0xc618, 0xffff, 0xffff, 0xffff, 0xc618, 0x0000,
-  0x0000, 0xc618, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff, 0xc618, 0x0000,
-  0x0000, 0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000, 0x0000,
-};
-
-int cloudy_ico [50] = {
-  0x0000, 0x0000, 0x0000, 0xffe0, 0x0000, 0x0000, 0xffe0, 0xc618, 0x0000, 0x0000,
-  0x0000, 0xffe0, 0xc618, 0xc618, 0x0000, 0xc618, 0xc618, 0xc618, 0xffe0, 0x0000,
-  0x0000, 0xc618, 0xc618, 0xc618, 0xffe0, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000,
-  0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xffe0,
-  0x0000, 0x0000, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0xc618, 0x0000, 0x0000,
-};
- */
-#endif
-
 int xo = 1, yo = 26;
-char use_ani = 0;
-char daytime = 1;
-
-void draw_weather_conditions() {
-  //0 - unk, 1 - sunny, 2 - cloudy, 3 - overcast, 4 - rainy, 5 - thunders, 6 - snow
-  Serial.print(F("weather conditions "));
-  Serial.println(condM);
-  //cleanup previous cond
-  xo = 3*TF_COLS; yo = 1;
-#ifdef USE_ICONS
-if (condM == 0 && daytime) {
-    Serial.print(F("!weather icon unkn, show: "));
-    Serial.println(condS);
-    int cc_dgr = display.color565 (30, 30, 30);
-    //draw the first 5 letters from the unknown weather condition
-    String lstr = condS.substring(0, (condS.length() > 5?5:condS.length()));
-    lstr.toUpperCase();
-    TFDrawText(&display, lstr, xo, yo, cc_dgr);
-  } else {
-    TFDrawText(&display, String("     "), xo, yo, 0);
-  }
-  //
-  xo = 4*TF_COLS; 
-  yo = 1;
-  switch (condM)
-  {
-    case 0://unk
-      break;
-    case 1://sunny
-      if (!daytime)
-        DrawIcon(&display, moony_ico, xo, yo, 10, 5);
-      else
-        DrawIcon(&display, sunny_ico, xo, yo, 10, 5);
-      //DrawIcon(&display, cloudy_ico, xo, yo, 10, 5);
-      //DrawIcon(&display, ovrcst_ico, xo, yo, 10, 5);
-      //DrawIcon(&display, rain_ico, xo, yo, 10, 5);
-      use_ani = 1;
-      break;
-    case 2://cloudy
-      DrawIcon(&display, cloudy_ico, xo, yo, 10, 5);
-      use_ani = 1;
-      break;
-    case 3://overcast
-      DrawIcon(&display, ovrcst_ico, xo, yo, 10, 5);
-      use_ani = 1;
-      break;
-    case 4://rainy
-      DrawIcon(&display, rain_ico, xo, yo, 10, 5);
-      use_ani = 1;
-      break;
-    case 5://thunders
-      DrawIcon(&display, thndr_ico, xo, yo, 10, 5);
-      use_ani = 1;
-      break;
-    case 6://snow
-      DrawIcon(&display, snow_ico, xo, yo, 10, 5);
-      use_ani = 1;
-      break;
-  }
-#else
-//  xo = 3*TF_COLS; yo = 1;
-//  Serial.print(F("!weather condition icon unknown, show: "));
-//  Serial.println(condS);
-//  int cc_dgr = display.color565 (30, 30, 30);
-  //draw the first 5 letters from the unknown weather condition
-//  String lstr = condS.substring(0, (condS.length() > 5?5:condS.length()));
-//  lstr.toUpperCase();
-//  TFDrawText(&display, lstr, xo, yo, cc_dgr);
-#endif
-}
 
 void draw_weather() {
   int cc_wht = display.color565(cin, cin, cin);
@@ -874,20 +549,26 @@ void draw_weather() {
     lcc = cc_red;
     if (*u_metric == 'Y') {
       //C
-      if (tempM < 26)
+      if (tempM < 26) {
         lcc = cc_grn;
-      if (tempM < 18)
+      }
+      if (tempM < 18) {
         lcc = cc_blu;
-      if (tempM < 6)
+      }
+      if (tempM < 6) {
         lcc = cc_wht;
+      }
     } else {
       //F
-      if (tempM < 79)
+      if (tempM < 79) {
         lcc = cc_grn;
-      if (tempM < 64)
+      }
+      if (tempM < 64) {
         lcc = cc_blu;
-      if (tempM < 43)
+      }
+      if (tempM < 43) {
         lcc = cc_wht;
+      }
     }
 
     xo=TF_COLS*lstr.length();
@@ -902,19 +583,22 @@ void draw_weather() {
     //weather conditions
     //-humidity
     lcc = cc_red;
-    if (humiM < 65)
+    if (humiM < 65) {
       lcc = cc_grn;
-    if (humiM < 35)
+    }
+    if (humiM < 35) {
       lcc = cc_blu;
-    if (humiM < 15)
+    }
+    if (humiM < 15) {
       lcc = cc_wht;
+    }
     lstr = String (humiM) + "%";
     xo = 8*TF_COLS;
     TFDrawText(&display, lstr, xo, yo, lcc);
     //-pressure
     lstr = String(presM);
     xo = 12*TF_COLS;
-    TFDrawText(&display, lstr, xo, yo, cc_blu);
+    TFDrawText(&display, lstr, xo, yo, cc_grn);
     //draw temp min/max
     if (tempMin > -10000) {
       xo = 0*TF_COLS; 
@@ -951,8 +635,6 @@ void draw_weather() {
       Serial.println(lstr);
       TFDrawText(&display, lstr, xo, yo, ct);
     }
-    //weather conditions
-    draw_weather_conditions ();
   }
 }
 
@@ -993,56 +675,12 @@ void draw_date() {
   }
 }
 
-void draw_animations(int stp) {
-#ifdef USE_ICONS
-  //weather icon animation
-  int xo = 4*TF_COLS; 
-  int yo = 1;
-  //0 - unk, 1 - sunny, 2 - cloudy, 3 - overcast, 4 - rainy, 5 - thunders, 6 - snow
-  if (use_ani)
-  {
-    int *af = NULL;
-    //weather/night icon
-    if (!daytime) {
-      af = mony_ani[stp%5];
-    } else {
-      switch (condM) {
-        case 1:
-            af = suny_ani[stp%5];
-          break;
-        case 2:
-            af = clod_ani[stp%5];
-          break;
-        case 3:
-            af = ovct_ani[stp%5];
-          break;
-        case 4:
-            af = rain_ani[stp%5];
-          break;
-        case 5:
-            af = thun_ani[stp%5];
-          break;
-        case 6:
-            af = snow_ani[stp%5];
-          break;
-      }
-    }
-    //draw animation
-    if (af) {
-      DrawIcon (&display, af, xo, yo, 10, 5);
-    }
-  }
-#endif
-}
-
 byte prevhh = 0;
 byte prevmm = 0;
 byte prevss = 0;
 long tnow;
 void loop() {
-	static int i = 0;
-	static int last = 0;
-  static int cm;
+  int cc_grn = display.color565(0, cin, 0);
   //time changes every miliseconds, we only want to draw when digits actually change
   tnow = now();
   //
@@ -1050,20 +688,12 @@ void loop() {
   hh24 = hh;
   mm = minute(tnow); //NTP.getMinute ();
   ss = second(tnow); //NTP.getSecond ();
-  //animations?
-  cm = millis();
-  //
-  //weather animations
-  if ((cm - last) > 150) {
-    //Serial.println(millis() - last);
-    last = cm;
-    i++;
-    //
-    draw_animations (i);
-    //
-  }
   //
   if (ntpsync) {
+
+//    Serial.print(F("Mm3:"));
+//    Serial.println(system_get_free_heap_size());
+
     ntpsync = 0;
     //
     prevss = ss;
@@ -1073,25 +703,22 @@ void loop() {
     if (hh >= 20 && cin == 150) {
       cin = 25;
 //      Serial.println(F("night mode brightness"));
-      daytime = 0;
     }
     if (hh < 8 && cin == 150) {
       cin = 25;
 //      Serial.println(F("night mode brightness"));
-      daytime = 0;
     }
     //during the day, bright
     if (hh >= 8 && hh < 20 && cin == 25) {
       cin = 150;
 //      Serial.println(F("day mode brightness"));
-      daytime = 1;
     }
     //we had a sync so draw without morphing
     int cc_gry = display.color565 (128, 128, 128);
     int cc_dgr = display.color565 (30, 30, 30);
     //dark blue is little visible on a dimmed screen
     //int cc_blu = display.color565 (0, 0, cin);
-    int cc_grn = display.color565(0, cin, 0);
+    cc_grn = display.color565(0, cin, 0);
     int cc_col = cc_gry;
     //
     if (cin == 25) {
@@ -1124,28 +751,25 @@ void loop() {
     digit3.Draw(mm / 10);
     digit4.Draw(hh % 10);
 
-    if ((military[0] == 'N') && (hh/10==0)) {
-      digit5.hide();      
+    if (military[0] == 'N') {
+      TFDrawChar(&display, (isAM()?'A':'P'), 63 - 1 + 3 - 9 * 2, 19, cc_grn);
+      TFDrawChar(&display, 'M', 63 - 1 - 2 - 9 * 1, 19, cc_grn);
+      if (hh/10==0) {
+        digit5.hide(); 
+      }     
     } else {
       digit5.Draw(hh / 10);
     }
-    
-    if (military[0] == 'N') {
-      if (isAM()) {
-        TFDrawChar(&display, 'A', 63 - 1 + 3 - 9 * 2, 19, cc_grn);
-        TFDrawChar(&display, 'M', 63 - 1 - 2 - 9 * 1, 19, cc_grn);
-      } else {
-        TFDrawChar(&display, 'P', 63 - 1 + 3 - 9 * 2, 19, pmColor);
-        TFDrawChar(&display, 'M', 63 - 1 - 2 - 9 * 1, 19, pmColor);
-      }
-    }
-    
+       
   } else {
 
     readLoop();
     
     //seconds
     if (ss != prevss) {
+//      Serial.print(F("Mm4:"));
+//      Serial.println(system_get_free_heap_size());
+
       int s0 = ss % 10;
       int s1 = ss / 10;
       if (s0 != digit0.Value ()) digit0.Morph (s0);
@@ -1199,6 +823,8 @@ void loop() {
           digit5.Morph(h1);
         }
       } else {
+        TFDrawChar(&display, (isAM()?'A':'P'), 63 - 1 + 3 - 9 * 2, 19, cc_grn);
+        TFDrawChar(&display, 'M', 63 - 1 - 2 - 9 * 1, 19, cc_grn);
         if (h1 == 0) {
           digit5.hide();
         } else {
@@ -1209,16 +835,6 @@ void loop() {
         }
       }
 
-      if (military[0] == 'N') {
-        if (isAM()) {
-          TFDrawChar(&display, 'A', 63 - 1 + 3 - 9 * 2, 19, amColor);
-          TFDrawChar(&display, 'M', 63 - 1 - 2 - 9 * 1, 19, amColor);
-        } else {
-          TFDrawChar(&display, 'P', 63 - 1 + 3 - 9 * 2, 19, pmColor);
-          TFDrawChar(&display, 'M', 63 - 1 - 2 - 9 * 1, 19, pmColor);
-        }
-      }
-
     }//hh changed
   }
   //set NTP sync interval as needed
@@ -1226,6 +842,4 @@ void loop() {
     //reset the sync interval if we're already in sync
     NTP.setInterval(3600 * 24);//re-sync every 24 hours
   }
-  //
-	//delay (0);
 }
