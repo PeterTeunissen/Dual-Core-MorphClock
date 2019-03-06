@@ -487,6 +487,8 @@ void readLoop() {
       NTP.setTimeZone(atoi(readBuf),0);
       saveConfig();
       readMode=' ';      
+      Serial.println(F("Switched TZ:"));
+      Serial.println(timezone);
     }
 
     if ((readMode=='Z' || readMode=='T') && strlen(readBuf)<8 && c>'*' && c<':') {
@@ -751,14 +753,15 @@ void loop() {
     digit3.Draw(mm / 10);
     digit4.Draw(hh % 10);
 
+    if ((military[0] == 'N') && (hh/10==0)) {
+      digit5.hide(); 
+    } else {
+      digit5.Draw(hh / 10);
+    }
+
     if (military[0] == 'N') {
       TFDrawChar(&display, (isAM()?'A':'P'), 63 - 1 + 3 - 9 * 2, 19, cc_grn);
       TFDrawChar(&display, 'M', 63 - 1 - 2 - 9 * 1, 19, cc_grn);
-      if (hh/10==0) {
-        digit5.hide(); 
-      }     
-    } else {
-      digit5.Draw(hh / 10);
     }
        
   } else {
@@ -823,8 +826,6 @@ void loop() {
           digit5.Morph(h1);
         }
       } else {
-        TFDrawChar(&display, (isAM()?'A':'P'), 63 - 1 + 3 - 9 * 2, 19, cc_grn);
-        TFDrawChar(&display, 'M', 63 - 1 - 2 - 9 * 1, 19, cc_grn);
         if (h1 == 0) {
           digit5.hide();
         } else {
@@ -835,6 +836,10 @@ void loop() {
         }
       }
 
+      if (military[0] == 'N') {
+        TFDrawChar(&display, (isAM()?'A':'P'), 63 - 1 + 3 - 9 * 2, 19, cc_grn);
+        TFDrawChar(&display, 'M', 63 - 1 - 2 - 9 * 1, 19, cc_grn);
+      }
     }//hh changed
   }
   //set NTP sync interval as needed
