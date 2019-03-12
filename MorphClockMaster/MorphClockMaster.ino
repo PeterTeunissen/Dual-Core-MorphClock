@@ -16,6 +16,21 @@ extern "C" {
   #include "user_interface.h"
 }
 
+const char JANUARY[]  = "JAN";
+const char FEBRUARY[]  = "FEB";
+const char MARCH[]  = "MAR";
+const char APRIL[]  = "APR";
+const char MAY[]  = "MAY";
+const char JUNE[]  = "JUN";
+const char JULY[]  = "JUL";
+const char AUGUST[]  = "AUG";
+const char SEPTEMBER[]  = "SEP";
+const char OCTOBER[]  = "OCT";
+const char NOVEMBER[]  = "NOV";
+const char DECEMBER[]  = "DEC";
+
+const char *const month_table[]  = {JANUARY,FEBRUARY,MARCH,APRIL,MAY,JUNE,JULY,AUGUST,SEPTEMBER,OCTOBER,NOVEMBER,DECEMBER};
+
 //#define USE_ICONS
 //#define USE_FIREWORKS
 //#define USE_WEATHER_ANI
@@ -90,6 +105,7 @@ char military[3] = "Y";     // 24 hour mode? Y/N
 char u_metric[3] = "N";     // use metric for units? Y/N
 char date_fmt[7] = "M/D/Y"; // date format: D.M.Y or M.D.Y or M.D or D.M or D/M/Y.. looking for trouble
 int digitColor;
+int errColor = 0;
 bool loadConfig() {
   File configFile = SPIFFS.open("/config.json", "r");
   if (!configFile) {
@@ -183,8 +199,8 @@ void wifi_setup() {
   loadConfig ();
 
   //-- Display --
-  display.fillScreen(display.color565 (0, 0, 0));
-  display.setTextColor(display.color565 (0, 0, 255));
+  display.fillScreen(display.color565(0, 0, 0));
+  display.setTextColor(display.color565(0, 0, 255));
 
   //-- WiFiManager --
   //Local intialization. Once its business is done, there is no need to keep it around
@@ -213,7 +229,7 @@ void wifi_setup() {
     display.setCursor(0, row2);
     display.print("192.168.4.1");
 
-    wifiManager.startConfigPortal (wifiManagerAPName, wifiManagerAPPassword);
+    wifiManager.startConfigPortal(wifiManagerAPName, wifiManagerAPPassword);
 
     display.fillScreen(display.color565(0, 0, 0));
   } else {
@@ -238,13 +254,13 @@ void wifi_setup() {
 //  Serial.print(F("date-format="));
 //  Serial.println(date_fmt);
   //timezone
-  strcpy(timezone, timeZoneParameter.getValue ());
+  strcpy(timezone, timeZoneParameter.getValue());
   //military time
-  strcpy(military, militaryParameter.getValue ());
+  strcpy(military, militaryParameter.getValue());
   //metric units
-  strcpy(u_metric, metricParameter.getValue ());
+  strcpy(u_metric, metricParameter.getValue());
   //date format
-  strcpy(date_fmt, dmydateParameter.getValue ());
+  strcpy(date_fmt, dmydateParameter.getValue());
   //display.fillScreen (0);
   //display.setCursor (2, row1);
   TFDrawText(&display, String("     ONLINE     "), 0, 13, display.color565(0, 0, 255));
@@ -253,13 +269,13 @@ void wifi_setup() {
   //
   //start NTP
   NTP.begin("pool.ntp.org", String(timezone).toInt(), false);
-  NTP.setInterval(10);//force rapid sync in 10sec
+  NTP.setInterval(10); //force rapid sync in 10sec
 
   if (shouldSaveConfig) {
-    saveConfig ();
+    saveConfig();
   }
   
-  getWeather ();
+  getWeather();
 }
 
 byte hh;
@@ -271,7 +287,7 @@ byte ntpsync = 1;
 void setup() {	
   Serial.begin(115200);
   //display setup
-  display.begin (16);
+  display.begin(16);
   display.setDriverChip(FM6126A);
 
   Serial.print(F("Mem1a:"));
@@ -289,14 +305,19 @@ void setup() {
   Serial.print(F("Mem1c:"));
   Serial.println(system_get_free_heap_size());
 
-  NTP.onNTPSyncEvent ([](NTPSyncEvent_t ntpEvent) {
+  NTP.onNTPSyncEvent([](NTPSyncEvent_t ntpEvent) {
     if (ntpEvent) {
       Serial.print("TimeSync err:");
-      if (ntpEvent == noResponse)
+      if (ntpEvent == noResponse) {
+        errColor = display.color565(0,cin,0); 
         Serial.println(F("NTP not reach"));
-      else if (ntpEvent == invalidAddress)
+      } 
+      if (ntpEvent == invalidAddress) {
+        errColor = display.color565(0,cin,0); 
         Serial.println(F("Invalid NTP address"));
+      }
     } else {
+      errColor = 0; 
       Serial.print(F("Got NTP time:"));
       Serial.println(NTP.getTimeDateString (NTP.getLastNTPSync ()));
       ntpsync = 1;
@@ -332,10 +353,10 @@ void setup() {
   }
 
 //open weather map api key 
-String apiKey   = "aec6c8810510cce7b0ee8deca174c79a"; //e.g a hex string like "abcdef0123456789abcdef0123456789"
+String apiKey = "aec6c8810510cce7b0ee8deca174c79a"; //e.g a hex string like "abcdef0123456789abcdef0123456789"
 //the city you want the weather for 
 String location = "Phoenixville,US"; //e.g. "Paris,FR"
-char server[]   = "api.openweathermap.org";
+char server[] = "api.openweathermap.org";
 WiFiClient client;
 int tempMin = -10000;
 int tempMax = -10000;
@@ -344,8 +365,10 @@ int presM = -10000;
 int humiM = -10000;
 String condS = "";
 void getWeather() {
+  errColor = 0;
   if (!apiKey.length()) {
     Serial.println(F("No API KEY for weather")); 
+    errColor = display.color565(cin,0,0); 
     return;
   }
   Serial.print(F("i:conn to weather")); 
@@ -357,12 +380,13 @@ void getWeather() {
     client.print("q="+location); 
     client.print("&appid="+apiKey); 
     client.print("&cnt=1"); 
-    (*u_metric=='Y')?client.println ("&units=metric"):client.println ("&units=imperial");
+    (*u_metric=='Y')?client.println("&units=metric"):client.println("&units=imperial");
     client.println("Host: api.openweathermap.org"); 
     client.println("Connection: close");
     client.println(); 
   } else { 
     Serial.println(F("w:fail connect"));
+    errColor = display.color565(cin,0,0); 
     return;
   } 
   delay(200);
@@ -370,8 +394,9 @@ void getWeather() {
   int bT, bT2;
   //do your best
   String line = client.readStringUntil('\n');
-  if (!line.length ()) {
+  if (!line.length()) {
     Serial.println(F("w:fail weather"));
+    errColor = display.color565(cin,0,0); 
   } else {
 //    Serial.print(F("weather:")); 
 //    Serial.println(line); 
@@ -407,10 +432,10 @@ void getWeather() {
     bT = line.indexOf("\"temp\":");
     if (bT > 0) {
       bT2 = line.indexOf(",\"", bT + 7);
-      sval = line.substring (bT + 7, bT2);
+      sval = line.substring(bT + 7, bT2);
       Serial.print(F("temp: "));
-      Serial.println (sval);
-      tempM = sval.toInt ();
+      Serial.println(sval);
+      tempM = sval.toInt();
     } else {
       Serial.println(F("temp NF!"));
     }
@@ -418,10 +443,10 @@ void getWeather() {
     bT = line.indexOf("\"temp_min\":");
     if (bT > 0) {
       bT2 = line.indexOf(",\"", bT + 11);
-      sval = line.substring (bT + 11, bT2);
+      sval = line.substring(bT + 11, bT2);
       Serial.print(F("temp min: "));
       Serial.println(sval);
-      tempMin = sval.toInt ();
+      tempMin = sval.toInt();
     } else {
       Serial.println(F("temp_min NF!"));
     }
@@ -429,10 +454,10 @@ void getWeather() {
     bT = line.indexOf("\"temp_max\":");
     if (bT > 0) {
       bT2 = line.indexOf("},", bT + 11);
-      sval = line.substring (bT + 11, bT2);
+      sval = line.substring(bT + 11, bT2);
       Serial.print("temp max: ");
       Serial.println(sval);
-      tempMax = sval.toInt ();
+      tempMax = sval.toInt();
     } else {
       Serial.println("temp_max NF!");
     }
@@ -440,7 +465,7 @@ void getWeather() {
     bT = line.indexOf("\"pressure\":");
     if (bT > 0) {
       bT2 = line.indexOf(",\"", bT + 11);
-      sval = line.substring (bT + 11, bT2);
+      sval = line.substring(bT + 11, bT2);
       Serial.print(F("press "));
       Serial.println(sval);
       presM = sval.toInt();
@@ -450,10 +475,10 @@ void getWeather() {
     //humiM
     bT = line.indexOf("\"humidity\":");
     if (bT > 0) {
-      bT2 = line.indexOf (",\"", bT + 11);
+      bT2 = line.indexOf(",\"", bT + 11);
       sval = line.substring (bT + 11, bT2);
       Serial.print(F("humi "));
-      Serial.println (sval);
+      Serial.println(sval);
       humiM = sval.toInt();
     } else {
       Serial.println(F("humidity NF!"));
@@ -500,11 +525,13 @@ void readLoop() {
     if (strlen(readBuf)>8) {
       readMode = ' ';
       Serial.println(F("readBuf overrun."));      
+      errColor = display.color565(0,0,cin);
     }
   }  
 }
 
-int xo = 1, yo = 26;
+int xo = 1;
+int yo = 26;
 
 void draw_weather() {
   int cc_wht = display.color565(cin, cin, cin);
@@ -527,20 +554,26 @@ void draw_weather() {
     int lcc = cc_red;
     if (*u_metric == 'Y') {
       //C
-      if (newTemp < 26)
+      if (newTemp < 26) {
         lcc = cc_grn;
-      if (newTemp < 18)
+      }
+      if (newTemp < 18) {
         lcc = cc_blu;
-      if (newTemp < 6)
+      }
+      if (newTemp < 6) {
         lcc = cc_wht;
+      }
     } else {
       //F
-      if (newTemp < 79)
+      if (newTemp < 79) {
         lcc = cc_grn;
-      if (newTemp < 64)
+      }
+      if (newTemp < 64) {
         lcc = cc_blu;
-      if (newTemp < 43)
+      }
+      if (newTemp < 43) {
         lcc = cc_wht;
+      }
     }
     //
     String lstr = String(newTemp) + String((*u_metric=='Y')?"C":"F");
@@ -597,14 +630,16 @@ void draw_weather() {
     lstr = String (humiM) + "%";
     xo = 8*TF_COLS;
     TFDrawText(&display, lstr, xo, yo, lcc);
+
     //-pressure
     lstr = String(presM);
     xo = 12*TF_COLS;
     TFDrawText(&display, lstr, xo, yo, cc_grn);
-    //draw temp min/max
+    
+    //draw temp min
     if (tempMin > -10000) {
       xo = 0*TF_COLS; 
-      yo = 26;
+      yo = 27;
       TFDrawText(&display, "   ", xo, yo, 0);
       lstr = String(tempMin);// + String((*u_metric=='Y')?"C":"F");
       //blue if negative
@@ -617,15 +652,19 @@ void draw_weather() {
       Serial.println(lstr);
       TFDrawText(&display, lstr, xo, yo, ct);
     }
+    
+    //draw temp max
     if (tempMax > -10000) {
       TFDrawText(&display, "   ", 13*TF_COLS, yo, 0);
       //move the text to the right or left as needed
       xo = 14*TF_COLS; 
-      yo = 26;
-      if (tempMax < 10)
+      yo = 27;
+      if (tempMax < 10) {
         xo = 15*TF_COLS;
-      if (tempMax > 99)
+      }
+      if (tempMax > 99) {
         xo = 13*TF_COLS;
+      }
       lstr = String (tempMax);// + String((*u_metric=='Y')?"C":"F");
       //blue if negative
       int ct = cc_dgr;
@@ -648,31 +687,34 @@ void draw_date() {
     //TFDrawChar (&display, '0' + i%10, xo + i * 5, yo, display.color565 (0, 255, 0));
   //date below the clock
   long tnow = now();
-  String lstr = "";
-  for (int i = 0; i < 5; i += 2) {
-    switch (date_fmt[i]) {
-      case 'D':
-        lstr += (day(tnow) < 10 ? "0" + String(day(tnow)) : String(day(tnow)));
-        if (i < 4)
-          lstr += date_fmt[i + 1];
-        break;
-      case 'M':
-        lstr += (month(tnow) < 10 ? "0" + String(month(tnow)) : String(month(tnow)));
-        if (i < 4)
-          lstr += date_fmt[i + 1];
-        break;
-      case 'Y':
-        lstr += String(year(tnow));
-        if (i < 4)
-          lstr += date_fmt[i + 1];
-        break;
-    }
-  }
+  char mnth[5];
+  strcpy(mnth, month_table[month(tnow)-1]);
+  String lstr = String(mnth) + "-" + String(day(tnow));
+
+//  for (int i = 0; i < 5; i += 2) {
+//    switch (date_fmt[i]) {
+//      case 'D':
+//        lstr += (day(tnow) < 10 ? "0" + String(day(tnow)) : String(day(tnow)));
+//        if (i < 4)
+//          lstr += date_fmt[i + 1];
+//        break;
+//      case 'M':
+//        lstr += (month(tnow) < 10 ? "0" + String(month(tnow)) : String(month(tnow)));
+//        if (i < 4)
+//          lstr += date_fmt[i + 1];
+//        break;
+//      case 'Y':
+//        lstr += String(year(tnow));
+//        if (i < 4)
+//          lstr += date_fmt[i + 1];
+//        break;
+//    }
+//  }
   //
   if (lstr.length()) {
     //
-    xo = 3*TF_COLS; 
-    yo = 26;
+    xo = 5*TF_COLS; 
+    yo = 27;
     TFDrawText(&display, lstr, xo, yo, cc_grn);
   }
 }
@@ -716,10 +758,10 @@ void loop() {
 //      Serial.println(F("day mode brightness"));
     }
     //we had a sync so draw without morphing
-    int cc_gry = display.color565 (128, 128, 128);
-    int cc_dgr = display.color565 (30, 30, 30);
+    int cc_gry = display.color565(128, 128, 128);
+    int cc_dgr = display.color565(30, 30, 30);
     //dark blue is little visible on a dimmed screen
-    //int cc_blu = display.color565 (0, 0, cin);
+    //int cc_blu = display.color565(0, 0, cin);
     cc_grn = display.color565(0, cin, 0);
     int cc_col = cc_gry;
     //
@@ -734,14 +776,18 @@ void loop() {
     digit4.setColor(cc_col);
     digit5.setColor(cc_col);
     digitColor = cc_col;
+
     //clear screen
-    display.fillScreen (0);
+    display.fillScreen(0);
+    
     //date and weather
     draw_weather();
     draw_date();
-    //
+
+    // Draw semicolon between digits
     digit2.DrawColon(cc_col);
     digit4.DrawColon(cc_col);
+    
     //military time?
     if (military[0] == 'N') {
       hh = hourFormat12(tnow);
@@ -763,38 +809,58 @@ void loop() {
       TFDrawChar(&display, (isAM()?'A':'P'), 63 - 1 + 3 - 9 * 2, 19, cc_grn);
       TFDrawChar(&display, 'M', 63 - 1 - 2 - 9 * 1, 19, cc_grn);
     }
-       
+
+    // Draw the error pixel after a reset
+    display.drawPixel(62,19,errColor);
+
   } else {
 
+    // Check if slave sent us anything.
     readLoop();
     
     //seconds
     if (ss != prevss) {
+
+      // Draw the error pixel every second
+      display.drawPixel(62,19,errColor);
+
 //      Serial.print(F("Mm4:"));
 //      Serial.println(system_get_free_heap_size());
 
       int s0 = ss % 10;
       int s1 = ss / 10;
-      if (s0 != digit0.Value ()) digit0.Morph (s0);
-      if (s1 != digit1.Value ()) digit1.Morph (s1);
+      if (s0 != digit0.Value()) {
+        digit0.Morph (s0);
+      }
+      if (s1 != digit1.Value()) {
+        digit1.Morph (s1);
+      }
       //ntpClient.PrintTime();
       prevss = ss;
-      //refresh weather every 5mins at 30sec in the minute
+
+      //Tell slave the temperature unit, every 15 and 45 seconds
       if (ss==15 || ss==45) {
         Serial.print(">");
         Serial.print(String((*u_metric=='Y')?"C":"F"));
         Serial.println("<");
-      }
+      }      
+
+      //get weather from API every 5mins and 30sec 
       if (ss == 30 && ((mm % 5) == 0)) {
-        getWeather ();
+        getWeather();
       }
     }
+
     //minutes
     if (mm != prevmm) {
       int m0 = mm % 10;
       int m1 = mm / 10;
-      if (m0 != digit2.Value ()) digit2.Morph (m0);
-      if (m1 != digit3.Value ()) digit3.Morph (m1);
+      if (m0 != digit2.Value()) {
+        digit2.Morph (m0);
+      }
+      if (m1 != digit3.Value()) {
+        digit3.Morph (m1);
+      }
       prevmm = mm;
       //
       draw_weather();
@@ -817,7 +883,9 @@ void loop() {
       //
       int h0 = hh % 10;
       int h1 = hh / 10;
-      if (h0 != digit4.Value ()) digit4.Morph (h0);
+      if (h0 != digit4.Value()) {
+        digit4.Morph (h0);
+      }
       //if (h1 != digit5.Value ()) digit5.Morph (h1);
 
       if (military[0] != 'N') {

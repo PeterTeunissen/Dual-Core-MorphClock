@@ -22,7 +22,6 @@
 
 const int LED_PIN = 2;
 const int SENSOR_INTERVAL = 5;
-unsigned long lastTimeSent = 0;
 uint8_t dataPin  = 2;  // D4  Yellow wire on Adafruit Pixels
 uint8_t clockPin = 14; //D5    Green wire on Adafruit Pixels
 int mode_flag = 1;
@@ -77,7 +76,7 @@ void setup() {
   strip.begin();
   strip.show();
 
-  Serial.println(F("Starting sensors"));
+  Serial.print(F("Starting sensors. Count:"));
   sensors.begin();  
   Serial.println(sensors.getDeviceCount());
 
@@ -119,7 +118,7 @@ void setup() {
   //keep LED on
   digitalWrite(BUILTIN_LED, LOW);
 
-  if (mdns.begin("ClockSlave_", WiFi.localIP() ) ) {
+  if (mdns.begin("ClockLights", WiFi.localIP() ) ) {
     Serial.println(F("MDNS responder started"));
   }
 
@@ -257,19 +256,21 @@ void getTimeZoneOffset() {
         if (json.get<const char*>("gmtOffset")) {
           strcpy(b, json["gmtOffset"]);
           int i = atoi(b);
-          int h=i/3600;
+          int h = i/3600;
           sprintf(timeZoneOffset,"%d",h);
           #ifdef LOG_MAX
             Serial.print(F("gmtOffset in json:"));    
             Serial.println(timeZoneOffset);    
           #else  
             Serial.print(F("."));
-          #endif  
+          #endif
+          NTP.setTimeZone(h,0);  
         } else {
           Serial.println(F("gmtOffset not found in json. Using: 0"));    
         }
       }
     }
+    http.end();
   }
 }
 
@@ -320,7 +321,7 @@ void handleSwitchOn() {
       case 3:handle_mode_3();
       break;
       default:                  
-        light_up_all();                          //Default to fixed colour should the EEProm become corrupted
+        light_up_all();           //Default to fixed colour should the EEProm become corrupted
       break;
   }
   server.send ( 200, "text/html", "<SCRIPT language='JavaScript'>window.location='/';</SCRIPT>" );
@@ -328,7 +329,7 @@ void handleSwitchOn() {
   
 void handleSwitchOff() {
   Serial.println(F("HandleSwitchOff"));
-  mode_flag=1;                                       //go to default fixed color mode and turn off all pixels
+  mode_flag=1;                   //go to default fixed color mode and turn off all pixels
   delay(100);
   turn_off_all();
   server.send ( 200, "text/html", "<SCRIPT language='JavaScript'>window.location='/';</SCRIPT>" );
@@ -381,7 +382,7 @@ void handleColour(){
   green_val.toCharArray(buf_green,3);           
   blue_val.toCharArray(buf_blue,3);             
 
-  red_int = gamma_adjust[strtol( buf_red, NULL, 16)];          //convert hex chars to ints and apply gamma adjust
+  red_int = gamma_adjust[strtol( buf_red, NULL, 16)];      //convert hex chars to ints and apply gamma adjust
   green_int = gamma_adjust[strtol( buf_green, NULL, 16)];
   blue_int = gamma_adjust[strtol( buf_blue, NULL, 16)];
 
@@ -392,9 +393,9 @@ void handleColour(){
 
   light_up_all(); 
   String java_redirect = "<SCRIPT language='JavaScript'>window.location='/set_colour?";
-        java_redirect += message;                                                 //send hash colour value in URL to update the colour picker control
+        java_redirect += message;                   //send hash colour value in URL to update the colour picker control
         java_redirect += "';</SCRIPT>";
-  server.send ( 200, "text/html", java_redirect );                                 // all done! - take user back to the colour picking page                                                                                          
+  server.send ( 200, "text/html", java_redirect );  // all done! - take user back to the colour picking page                                                                                          
 }
 
 void handleBrightness() {
@@ -410,27 +411,27 @@ void handleBrightness() {
     Serial.println(brightness);
   #endif
   String java_redirect = "<SCRIPT language='JavaScript'>window.location='/set_brightness?";
-          java_redirect += brightness;                                              //send brightness value in URL to update the slider control
+          java_redirect += brightness;             //send brightness value in URL to update the slider control
           java_redirect += "';</SCRIPT>";
-  server.send ( 200, "text/html", java_redirect);                                  // all done! - take user back to the brightness selection page                                                                                          
+  server.send ( 200, "text/html", java_redirect);  // all done! - take user back to the brightness selection page                                                                                          
 }
 
 void light_up_all() {
   for(int i=0;i<NUMPIXELS;i++){      
-    strip.setPixelColor(i, getColor(brightness*red_int/255,brightness*green_int/255,brightness*blue_int/255));                            // Set colour with gamma correction and brightness adjust value. 
+    strip.setPixelColor(i, getColor(brightness*red_int/255,brightness*green_int/255,brightness*blue_int/255)); // Set colour with gamma correction and brightness adjust value. 
     strip.show();
   }                                                                                                                            
 }
 
 void turn_off_all() {
   Serial.println(F("HandleTurnOffAll"));
-  mode_flag=999;                                       //go to non-existent mode and turn off all pixels
+  mode_flag=999;                                      //go to non-existent mode and turn off all pixels
   EEPROM.write(4,mode_flag);                          //write mode to EEProm so can be restored on start-up
   EEPROM.commit();
-  for(int i=0;i<NUMPIXELS;i++){                                                                                                              // pixels.Color takes RGB values, from 0,0,0 up to 255,255,255
-    strip.setPixelColor(i, getColor(0,0,0));                                                                                               // Turn off led strip
-    strip.show();
-  }                                                                                                                            // This sends the updated pixel color to the hardware.
+  for(int i=0;i<NUMPIXELS;i++){                       // pixels.Color takes RGB values, from 0,0,0 up to 255,255,255
+    strip.setPixelColor(i, getColor(0,0,0));          // Turn off led strip
+    strip.show();                                     // This sends the updated pixel color to the hardware.
+  }
 }  
 
 int j;
@@ -445,7 +446,7 @@ void handle_mode_1(){                                  //fixed colour mode
   EEPROM.commit();
   server.send ( 200, "text/html","<SCRIPT language='JavaScript'>window.location='/';</SCRIPT>");
                                    
-  light_up_all();                           //set mode to default state - all led's on, fixed colour. This loop will service any brightness changes
+  light_up_all();                                     //set mode to default state - all led's on, fixed colour. This loop will service any brightness changes
 }
 
 void handle_mode_2(){                                 //colour fade mode
@@ -537,6 +538,7 @@ void rainbow(uint8_t wait) {
 }
 
 int prevSec;
+int prevMin;
 
 void loop() {
 
@@ -587,13 +589,13 @@ void loop() {
     if (second()==5 || second()==35){
       #ifdef LOG_MAX
         Serial.print(F("Bef:"));
-        Serial.print(NTP.getTimeDateString(now()));
+        Serial.println(NTP.getTimeDateString(now()));
       #else
         Serial.println(F("."));  
       #endif
-      prevSec = second();
   
-      if ((hour()>23 || hour()<5) && (minute()>57 || minute()<4)) {
+      if ((hour()>23 || hour()<5) && (minute()>57 || minute()<4) && (minute()!=prevMin)) {
+        prevMin = minute();
         getTimeZone();
         getTimeZoneOffset();      
       }
@@ -606,6 +608,7 @@ void loop() {
       #endif
     }
 
+    // Send tz every 15 and 45 seconds
     if (second()==15 || second()==45){
       if (strlen(timeZoneOffset)>0) {
         Serial.print(F("tz:["));
@@ -614,6 +617,7 @@ void loop() {
       }
     }
 
+    // Sends temperature every 20 and 50 seconds.
     if (second()==20 || second()==50) {
       digitalWrite(LED_PIN, LOW);
   
@@ -639,7 +643,6 @@ void loop() {
       }
   
       digitalWrite(LED_PIN, HIGH);
-      lastTimeSent = millis();      
     }
   }  
 }
