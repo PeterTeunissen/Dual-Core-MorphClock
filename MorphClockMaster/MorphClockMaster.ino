@@ -106,6 +106,7 @@ char u_metric[3] = "N";     // use metric for units? Y/N
 char date_fmt[7] = "M/D/Y"; // date format: D.M.Y or M.D.Y or M.D or D.M or D/M/Y.. looking for trouble
 int digitColor;
 int errColor = 0;
+
 bool loadConfig() {
   File configFile = SPIFFS.open("/config.json", "r");
   if (!configFile) {
@@ -319,7 +320,7 @@ void setup() {
     } else {
       errColor = 0; 
       Serial.print(F("Got NTP time:"));
-      Serial.println(NTP.getTimeDateString (NTP.getLastNTPSync ()));
+      Serial.println(NTP.getTimeDateString(NTP.getLastNTPSync()));
       ntpsync = 1;
     }
   });
@@ -350,7 +351,7 @@ void setup() {
   }
 
   strcpy(readBuf,"");
-  }
+}
 
 //open weather map api key 
 String apiKey = "aec6c8810510cce7b0ee8deca174c79a"; //e.g a hex string like "abcdef0123456789abcdef0123456789"
@@ -364,6 +365,7 @@ int tempM = -10000;
 int presM = -10000;
 int humiM = -10000;
 String condS = "";
+
 void getWeather() {
   errColor = 0;
   if (!apiKey.length()) {
@@ -448,7 +450,7 @@ void getWeather() {
       Serial.println(sval);
       tempMin = sval.toInt();
     } else {
-      Serial.println(F("temp_min NF!"));
+      Serial.println(F("t_min NF!"));
     }
     //tempMax
     bT = line.indexOf("\"temp_max\":");
@@ -459,7 +461,7 @@ void getWeather() {
       Serial.println(sval);
       tempMax = sval.toInt();
     } else {
-      Serial.println("temp_max NF!");
+      Serial.println("t_max NF!");
     }
     //pressM
     bT = line.indexOf("\"pressure\":");
@@ -470,7 +472,7 @@ void getWeather() {
       Serial.println(sval);
       presM = sval.toInt();
     } else {
-      Serial.println(F("pressure NF!"));
+      Serial.println(F("pres NF!"));
     }
     //humiM
     bT = line.indexOf("\"humidity\":");
@@ -481,7 +483,7 @@ void getWeather() {
       Serial.println(sval);
       humiM = sval.toInt();
     } else {
-      Serial.println(F("humidity NF!"));
+      Serial.println(F("hum NF!"));
     }
   }//connected
 }
@@ -508,12 +510,17 @@ void readLoop() {
 
     if (c==']' && readMode=='Z') {
       Serial.println();
-      strcpy(timezone,readBuf);
-      NTP.setTimeZone(atoi(readBuf),0);
-      saveConfig();
+      if (strcmp(readBuf,timezone)!=0) {
+        NTP.setTimeZone(atoi(readBuf),0);
+        strcpy(timezone,readBuf);
+        saveConfig();
+        Serial.println(F("Switched TZ:"));
+        Serial.println(timezone);
+      } else {
+        Serial.println(F("Same tz"));
+      }
+      
       readMode=' ';      
-      Serial.println(F("Switched TZ:"));
-      Serial.println(timezone);
     }
 
     if ((readMode=='Z' || readMode=='T') && strlen(readBuf)<8 && c>'*' && c<':') {
@@ -544,7 +551,7 @@ void draw_weather() {
 //  Serial.println(F("showing the weather"));
   xo = 0; 
   yo = 1;
-  TFDrawText (&display, String("                "), xo, yo, cc_dgr);
+  TFDrawText(&display, String("                "), xo, yo, cc_dgr);
   if (tempM == -10000 || humiM == -10000 || presM == -10000) {
     //TFDrawText (&display, String("NO WEATHER DATA"), xo, yo, cc_dgr);
 //    Serial.println(F("!no weather data available"));
@@ -862,14 +869,14 @@ void loop() {
         digit3.Morph (m1);
       }
       prevmm = mm;
-      //
+	  
+      // Update weather info on display every minute
       draw_weather();
-      //drawTemp();
     }
     //hours
     if (hh != prevhh) {
       prevhh = hh;
-      //
+      // Update the date info on the display only on the full hour
       draw_date();
       //brightness control: dimmed during the night(25), bright during the day(150)
       if (hh == 20 || hh == 8) {
@@ -884,7 +891,7 @@ void loop() {
       int h0 = hh % 10;
       int h1 = hh / 10;
       if (h0 != digit4.Value()) {
-        digit4.Morph (h0);
+        digit4.Morph(h0);
       }
       //if (h1 != digit5.Value ()) digit5.Morph (h1);
 
